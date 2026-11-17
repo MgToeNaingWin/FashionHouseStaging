@@ -15,6 +15,9 @@ import {
   Store,
   Sun,
   Moon,
+  HomeIcon,
+  ShoppingBag,
+  ShoppingCartPlus,
 } from 'lucide-react';
 
 const AdminLayout = () => {
@@ -61,6 +64,11 @@ const AdminLayout = () => {
           path: '/admin/orders',
           label: t('admin.orders.title'),
           icon: ShoppingCart,
+        },
+        {
+          path: '/shop',
+          label: t('admin.shop.title'),
+          icon: ShoppingCartPlus,
         },
       ],
     },

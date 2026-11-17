@@ -107,12 +107,12 @@ const Home = () => {
               <Sparkles size={13} /> {t('home.heroTag')}
             </span>
             <h1 className="mt-6 font-display text-5xl font-black leading-[0.95] tracking-tight text-gray-900 dark:text-white md:text-7xl">
-              {t('home.heroTitle1')}
+            Wear the
               <br />
-              <span className="text-gradient">{t('home.heroTitle2')}</span>
+              <span className="text-gradient">quiet luxury.</span>
             </h1>
             <p className="mt-6 max-w-md text-base leading-relaxed text-gray-600 dark:text-gray-300">
-              {t('home.heroSubtitle')}
+            A curated atelier of ready-to-wear, footwear and accessories — considered materials, honest pricing, delivered to your door across Myanmar.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-4">
               <Link

@@ -179,6 +179,9 @@
       "productCount": "{{count}} products",
       "productCount_one": "{{count}} product",
       "productCount_other": "{{count}} products"
+    },
+    "shop" :{
+      "title" : "Shop"
     }
   },
   "home": {
