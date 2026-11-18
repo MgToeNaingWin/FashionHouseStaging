@@ -2,10 +2,12 @@ import React, { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
-  DollarSign, ShoppingBag, Users, Package, TrendingUp, AlertTriangle, ArrowRight, RefreshCw, Layers,
+  DollarSign, ShoppingBag, Users, Package, TrendingUp, AlertTriangle, ArrowRight, RefreshCw, Layers, Mail,
 } from 'lucide-react'
-import { adminApi, formatKyat, parsePrice } from '../services/baseApi.jsx'
+import { adminApi, contactApi, formatKyat, parsePrice } from '../services/baseApi.jsx'
+import { getAdminSocket } from '../services/socket.js'
 import OrderStatusBadge from '../components/OrderStatusBadge'
+import TableScroll from '../components/ui/TableScroll'
 
 const STATUS_COLORS = {
   pending: '#f2b75a',
@@ -18,15 +20,15 @@ const STATUS_COLORS = {
 }
 
 const StatCard = ({ icon: Icon, label, value, tint, sub }) => (
-  <div className="fh-fade-up relative overflow-hidden rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-950">
+  <div className="fh-fade-up relative min-w-0 overflow-hidden rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-950 sm:p-6">
     <div className="absolute -right-6 -top-6 h-24 w-24 rounded-full opacity-10" style={{ backgroundColor: tint }} />
-    <div className="flex items-center justify-between">
-      <span className="text-sm font-medium text-gray-500 dark:text-gray-400">{label}</span>
-      <span className="flex h-9 w-9 items-center justify-center rounded-lg" style={{ backgroundColor: `${tint}1f`, color: tint }}>
+    <div className="flex items-center justify-between gap-3">
+      <span className="min-w-0 text-sm font-medium text-gray-500 dark:text-gray-400">{label}</span>
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: `${tint}1f`, color: tint }}>
         <Icon size={18} strokeWidth={2} />
       </span>
     </div>
-    <p className="mt-4 font-display text-3xl font-black tracking-tight text-gray-900 dark:text-white">{value}</p>
+    <p className="mt-4 break-words font-display text-2xl font-black tracking-tight text-gray-900 dark:text-white sm:text-3xl">{value}</p>
     {sub && <p className="mt-1 text-xs text-gray-400">{sub}</p>}
   </div>
 )
@@ -37,32 +39,78 @@ const AdminDashboard = () => {
   const [recent, setRecent] = useState([])
   const [lowStock, setLowStock] = useState([])
   const [best, setBest] = useState([])
+  const [unreadMessages, setUnreadMessages] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  const load = async () => {
-    setLoading(true)
+  const load = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true)
     setError(null)
     try {
-      const [dash, rec, low, bs] = await Promise.all([
+      const [dash, rec, low, bs, unread] = await Promise.all([
         adminApi.dashboard(),
         adminApi.recentOrders(),
         adminApi.lowStock(),
         adminApi.bestSelling(),
+        // Notification counter for customer contact messages. A failure here
+        // must not take the whole dashboard down, hence the catch.
+        contactApi.unreadCount().catch(() => null),
       ])
       setStats(dash)
       setRecent(rec.orders || [])
       setLowStock(low.products || [])
       setBest(bs.products || [])
+      setUnreadMessages(unread?.unread ?? 0)
     } catch (err) {
       setError(err.message || t('admin.loadError'))
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
   useEffect(() => {
     load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Real-time: orders, contact messages, product/inventory and user changes
+  // all refresh the dashboard without a manual reload. Debounced so bursts
+  // (e.g. an order that also changes product stock) collapse into one fetch.
+  // The shared singleton socket is owned by AdminLayout; we only attach and
+  // detach listeners here, and catch up with a refetch after reconnects.
+  useEffect(() => {
+    const socket = getAdminSocket()
+    let hasConnected = socket.connected
+    let timer = null
+
+    const refresh = () => {
+      clearTimeout(timer)
+      timer = setTimeout(() => load({ silent: true }), 300)
+    }
+    const onConnect = () => {
+      // Skip the initial connect (the page already loaded); on reconnects the
+      // events missed while offline must be reconciled with a refetch.
+      if (!hasConnected) {
+        hasConnected = true
+        return
+      }
+      refresh()
+    }
+
+    const events = [
+      'new_order', 'order_status_changed', 'order_updated',
+      'contact_message_created', 'contact_message_updated', 'contact_message_deleted',
+      'product_created', 'product_updated', 'product_deleted',
+      'user_updated',
+    ]
+    events.forEach((e) => socket.on(e, refresh))
+    socket.on('connect', onConnect)
+
+    return () => {
+      clearTimeout(timer)
+      events.forEach((e) => socket.off(e, refresh))
+      socket.off('connect', onConnect)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -102,7 +150,7 @@ const AdminDashboard = () => {
 
   return (
     <div>
-      <div className="mb-6 flex items-end justify-between">
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="font-display text-2xl font-black text-gray-900 dark:text-white">{t('admin.dashboard')}</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t('admin.overviewSubtitle')}</p>
@@ -122,8 +170,8 @@ const AdminDashboard = () => {
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Recent orders */}
-        <div className="rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-950 lg:col-span-2">
-          <div className="mb-4 flex items-center justify-between">
+        <div className="min-w-0 rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950 sm:p-6 lg:col-span-2">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <h2 className="font-display text-lg font-bold text-gray-900 dark:text-white">{t('admin.recentOrders')}</h2>
             <Link to="/admin/orders" className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-brand hover:underline">
               {t('admin.viewAll')} <ArrowRight size={13} />
@@ -132,28 +180,28 @@ const AdminDashboard = () => {
           {recent.length === 0 ? (
             <p className="py-8 text-center text-sm text-gray-400">{t('admin.noOrders')}</p>
           ) : (
-            <div className="overflow-x-auto">
+            <TableScroll minWidth={560} label={t('admin.recentOrders')}>
               <table className="w-full text-left text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 text-xs uppercase tracking-wider text-gray-400 dark:border-gray-800">
-                    <th className="pb-3 font-semibold">{t('admin.orders.order')}</th>
-                    <th className="pb-3 font-semibold">{t('admin.customer')}</th>
-                    <th className="pb-3 font-semibold">{t('admin.orderStatus')}</th>
-                    <th className="pb-3 text-right font-semibold">{t('admin.amount')}</th>
+                    <th className="whitespace-nowrap pb-3 pr-3 font-semibold">{t('admin.orders.order')}</th>
+                    <th className="whitespace-nowrap pb-3 pr-3 font-semibold">{t('admin.customer')}</th>
+                    <th className="whitespace-nowrap pb-3 pr-3 font-semibold">{t('admin.orderStatus')}</th>
+                    <th className="whitespace-nowrap pb-3 text-right font-semibold">{t('admin.amount')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50 dark:divide-gray-800/60">
                   {recent.slice(0, 6).map((o) => (
                     <tr key={o._id}>
-                      <td className="py-3 font-mono text-xs font-semibold text-gray-900 dark:text-white">{o.orderNumber}</td>
-                      <td className="py-3 text-gray-600 dark:text-gray-300">{o.userId?.username || '—'}</td>
-                      <td className="py-3"><OrderStatusBadge status={o.orderStatus} withIcon={false} /></td>
-                      <td className="py-3 text-right font-semibold text-gray-900 dark:text-white">{formatKyat(o.totalAmount)}</td>
+                      <td className="whitespace-nowrap py-3 pr-3 font-mono text-xs font-semibold text-gray-900 dark:text-white">{o.orderNumber}</td>
+                      <td className="max-w-[180px] truncate py-3 pr-3 text-gray-600 dark:text-gray-300">{o.userId?.username || '—'}</td>
+                      <td className="whitespace-nowrap py-3 pr-3"><OrderStatusBadge status={o.orderStatus} withIcon={false} /></td>
+                      <td className="whitespace-nowrap py-3 text-right font-semibold text-gray-900 dark:text-white">{formatKyat(o.totalAmount)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </div>
+            </TableScroll>
           )}
 
           {/* Status distribution */}
@@ -173,9 +221,30 @@ const AdminDashboard = () => {
           </div>
         </div>
 
-        {/* Right column: best sellers + low stock */}
-        <div className="space-y-6">
-          <div className="rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-950">
+        {/* Right column: messages + best sellers + low stock */}
+        <div className="min-w-0 space-y-6">
+          {/* Unread contact messages — notification area */}
+          <Link
+            to="/admin/messages"
+            className="block rounded-2xl border border-gray-200 bg-white p-4 transition-colors hover:border-brand/50 dark:border-gray-800 dark:bg-gray-950 sm:p-6"
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="flex items-center gap-2 font-display text-lg font-bold text-gray-900 dark:text-white">
+                <Mail size={18} className="text-brand" /> {t('admin.messages.unreadCount')}
+              </h2>
+              {unreadMessages > 0 && (
+                <span className="rounded-full bg-brand px-2.5 py-1 text-xs font-bold text-white">{unreadMessages}</span>
+              )}
+            </div>
+            <p className="mt-3 font-display text-3xl font-black text-gray-900 dark:text-white">
+              {unreadMessages.toLocaleString()}
+            </p>
+            <span className="mt-1 inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-brand hover:underline">
+              {t('admin.messages.viewMessages')} <ArrowRight size={12} />
+            </span>
+          </Link>
+
+          <div className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950 sm:p-6">
             <h2 className="mb-4 flex items-center gap-2 font-display text-lg font-bold text-gray-900 dark:text-white">
               <TrendingUp size={18} className="text-emerald-500" /> {t('admin.bestSelling')}
             </h2>
@@ -197,7 +266,7 @@ const AdminDashboard = () => {
             )}
           </div>
 
-          <div className="rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-950">
+          <div className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-950 sm:p-6">
             <h2 className="mb-4 flex items-center gap-2 font-display text-lg font-bold text-gray-900 dark:text-white">
               <AlertTriangle size={18} className="text-gold" /> {t('admin.lowStock')}
             </h2>

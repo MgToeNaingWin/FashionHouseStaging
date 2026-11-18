@@ -2,6 +2,8 @@ const catchAsync = require('../src/utils/catchAsync');
 const responseHandler = require('../src/utils/responseHandler');
 const Product = require('../src/models/Product');
 const Wishlist = require('../src/models/Wishlist');
+// Wishlist data is private to its owner — emit only into the user's own room.
+const { emitToUser } = require('../src/services/socketService');
 
 // Wishlist entries live in their own collection ({ userId, productId }, unique
 // together). We always return the full populated list so the client can reconcile
@@ -49,6 +51,9 @@ const addToWishlist = catchAsync(async (req, res) => {
   }
 
   const wishlist = (await getPopulatedWishlist(req.user._id)).filter((w) => w.productId);
+
+  emitToUser(req.user._id, 'wishlist_updated', { wishlist });
+
   responseHandler.success(res, 201, { wishlist }, 'Product added to wishlist successfully');
 });
 
@@ -67,6 +72,9 @@ const removeFromWishlist = catchAsync(async (req, res) => {
   await Wishlist.deleteOne({ userId: req.user._id, productId });
 
   const wishlist = (await getPopulatedWishlist(req.user._id)).filter((w) => w.productId);
+
+  emitToUser(req.user._id, 'wishlist_updated', { wishlist });
+
   responseHandler.success(res, 200, { wishlist }, 'Product removed from wishlist successfully');
 });
 
@@ -77,6 +85,9 @@ const clearWishlist = catchAsync(async (req, res) => {
   }
 
   await Wishlist.deleteMany({ userId: req.user._id });
+
+  emitToUser(req.user._id, 'wishlist_updated', { wishlist: [] });
+
   responseHandler.success(res, 200, { wishlist: [] }, 'Wishlist cleared successfully');
 });
 

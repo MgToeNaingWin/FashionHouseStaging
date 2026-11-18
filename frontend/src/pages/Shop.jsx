@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { Search, SlidersHorizontal, X, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react'
 import { catalogApi } from '../services/baseApi.jsx'
 import { parsePrice } from '../services/baseApi.jsx'
+import { getSocket } from '../services/socket.js'
 import { totalStock } from '../lib/catalog'
 import ProductCard from '../components/ProductCard'
 import EmptyState from '../components/EmptyState'
@@ -36,8 +37,11 @@ const Shop = () => {
     setPage(1)
   }
 
-  const load = async () => {
-    setLoading(true)
+  // `silent` refreshes skip the skeleton so a live catalog update does not
+  // flash the whole grid; filters/search/sort/page live in the URL and state,
+  // so they are preserved across the refresh.
+  const load = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true)
     setError(null)
     try {
       const [pData, cData] = await Promise.all([
@@ -49,12 +53,41 @@ const Shop = () => {
     } catch (err) {
       setError(err.message || t('shop.loadError'))
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
   useEffect(() => {
     load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Live catalog sync: admin product/category changes appear without a page
+  // refresh. Debounced so a burst of events results in one fetch.
+  useEffect(() => {
+    const socket = getSocket()
+    let hasConnected = socket.connected
+    let timer = null
+    const schedule = () => {
+      clearTimeout(timer)
+      timer = setTimeout(() => load({ silent: true }), 300)
+    }
+    // After a reconnect, events emitted while offline were missed — reconcile.
+    const onConnect = () => {
+      if (!hasConnected) { hasConnected = true; return }
+      schedule()
+    }
+    const events = [
+      'product_created', 'product_updated', 'product_deleted',
+      'category_created', 'category_updated', 'category_deleted',
+    ]
+    events.forEach((e) => socket.on(e, schedule))
+    socket.on('connect', onConnect)
+    return () => {
+      clearTimeout(timer)
+      events.forEach((e) => socket.off(e, schedule))
+      socket.off('connect', onConnect)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

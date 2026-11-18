@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Package, ChevronRight, ShoppingBag, Calendar, AlertCircle } from 'lucide-react'
 import { orderApi, formatKyat } from '../services/baseApi.jsx'
+import { getSocket } from '../services/socket.js'
 import OrderStatusBadge from '../components/OrderStatusBadge'
 import EmptyState from '../components/EmptyState'
 
@@ -15,8 +16,8 @@ const Orders = () => {
   const [error, setError] = useState(null)
   const [filter, setFilter] = useState('all')
 
-  const load = async () => {
-    setLoading(true)
+  const load = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true)
     setError(null)
     try {
       const data = await orderApi.myOrders({ page: 1, limit: 100 })
@@ -24,12 +25,38 @@ const Orders = () => {
     } catch (err) {
       setError(err.message || t('orders.loadError'))
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
   useEffect(() => {
     load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Live order sync: admin status changes (and orders placed from another
+  // tab/device) appear here without a refresh. Silent so the list never flashes.
+  useEffect(() => {
+    const socket = getSocket()
+    let hasConnected = socket.connected
+    let timer = null
+    const schedule = () => {
+      clearTimeout(timer)
+      timer = setTimeout(() => load({ silent: true }), 300)
+    }
+    // Reconcile after a reconnect so orders changed while offline reappear.
+    const onConnect = () => {
+      if (!hasConnected) { hasConnected = true; return }
+      schedule()
+    }
+    const events = ['order_created', 'order_status_changed', 'order_updated']
+    events.forEach((e) => socket.on(e, schedule))
+    socket.on('connect', onConnect)
+    return () => {
+      clearTimeout(timer)
+      events.forEach((e) => socket.off(e, schedule))
+      socket.off('connect', onConnect)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

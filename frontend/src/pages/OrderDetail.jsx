@@ -5,6 +5,7 @@ import {
   ArrowLeft, MapPin, Package, CreditCard, AlertCircle, XCircle, CheckCircle2, StickyNote,
 } from 'lucide-react'
 import { orderApi, formatKyat, parsePrice } from '../services/baseApi.jsx'
+import { getSocket } from '../services/socket.js'
 import { colorSwatch } from '../lib/catalog'
 import OrderStatusBadge from '../components/OrderStatusBadge'
 import EmptyState from '../components/EmptyState'
@@ -23,8 +24,8 @@ const OrderDetail = () => {
   const [reason, setReason] = useState('')
   const [cancelling, setCancelling] = useState(false)
 
-  const load = async () => {
-    setLoading(true)
+  const load = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true)
     setError(null)
     try {
       const data = await orderApi.myOrderById(id)
@@ -32,13 +33,51 @@ const OrderDetail = () => {
     } catch (err) {
       setError(err.message || t('orders.loadError'))
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id])
+
+  // Live order sync: an admin status change (or the order being cancelled from
+  // another tab) patches this page in place — no refresh, no skeleton flash.
+  useEffect(() => {
+    const socket = getSocket()
+    let hasConnected = socket.connected
+    const apply = (payload) => {
+      const o = payload?.order
+      if (!o?._id || String(o._id) !== String(id)) return
+      setOrder((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          orderStatus: o.orderStatus ?? prev.orderStatus,
+          paymentStatus: o.paymentStatus ?? prev.paymentStatus,
+          notes: o.notes ?? prev.notes,
+          subtotal: o.subtotal ?? prev.subtotal,
+          totalAmount: o.totalAmount ?? prev.totalAmount,
+        }
+      })
+    }
+    // Missed events are reconciled with a silent reload after reconnecting.
+    const onConnect = () => {
+      if (!hasConnected) {
+        hasConnected = true
+        return
+      }
+      load({ silent: true })
+    }
+    socket.on('order_status_changed', apply)
+    socket.on('order_updated', apply)
+    socket.on('connect', onConnect)
+    return () => {
+      socket.off('order_status_changed', apply)
+      socket.off('order_updated', apply)
+      socket.off('connect', onConnect)
+    }
   }, [id])
 
   const handleCancel = async () => {

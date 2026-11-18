@@ -48,14 +48,9 @@ if (config.env !== 'test') {
 }
 
 // CORS configuration - allow the frontend origin (with credentials for cookies)
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://localhost:3000',
-  config.clientUrl,
-];
 const corsOptions = {
   origin(origin, callback) {
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+    if (!origin || config.allowedOrigins.indexOf(origin) !== -1) {
       return callback(null, true);
     }
     return callback(new Error('Not allowed by CORS'));
@@ -75,6 +70,7 @@ const paymentRoutes = require('../routes/paymentRoutes');
 const shipmentRoutes = require('../routes/shipmentRoutes');
 const reviewRoutes = require('../routes/reviewRoutes');
 const adminRoutes = require('../routes/adminRoutes');
+const contactRoutes = require('../routes/contactRoutes');
 const healthRouter = require('../routes/health');
 
 app.use('/api/auth', authRoutes);
@@ -87,6 +83,7 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/shipments', shipmentRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/contact', contactRoutes);
 
 // Health check endpoint with database status
 app.get('/api/health', (req, res) => {

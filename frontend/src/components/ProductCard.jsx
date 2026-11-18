@@ -45,10 +45,14 @@ const ProductCard = ({ product, index = 0 }) => {
   const handleWishlist = async (e) => {
     e.preventDefault()
     e.stopPropagation()
-    const res = await dispatch(toggleWishlistThunk(product)).unwrap()
-    toast[res?.added ? 'success' : 'info'](
-      res?.added ? t('product.addedToWishlist') : t('product.removedFromWishlist')
-    )
+    try {
+      const res = await dispatch(toggleWishlistThunk(product)).unwrap()
+      toast[res?.added ? 'success' : 'info'](
+        res?.added ? t('product.addedToWishlist') : t('product.removedFromWishlist')
+      )
+    } catch (err) {
+      toast.error(typeof err === 'string' ? err : t('common.actionFailed'))
+    }
   }
 
   return (

@@ -2,6 +2,8 @@ const catchAsync = require('../src/utils/catchAsync');
 const responseHandler = require('../src/utils/responseHandler');
 const Product = require('../src/models/Product');
 const Cart = require('../src/models/Cart');
+// Cart data is private to its owner — emit only into the user's own room.
+const { emitToUser } = require('../src/services/socketService');
 
 // Decimal128 / string / number -> finite JS number (prices are stored as Decimal128).
 const toNum = (v) => {
@@ -97,6 +99,10 @@ const addToCart = catchAsync(async (req, res) => {
   await cart.save();
 
   const populated = await Cart.findById(cart._id).populate('items.productId', CART_POPULATE);
+
+  // Keeps the owner's other tabs/devices in sync with the persisted cart.
+  emitToUser(req.user._id, 'cart_updated', { cart: populated });
+
   responseHandler.success(res, 201, { cart: populated }, 'Item added to cart successfully');
 });
 
@@ -137,6 +143,9 @@ const updateCartItem = catchAsync(async (req, res) => {
   await cart.save();
 
   const populated = await Cart.findById(cart._id).populate('items.productId', CART_POPULATE);
+
+  emitToUser(req.user._id, 'cart_updated', { cart: populated });
+
   responseHandler.success(res, 200, { cart: populated }, 'Cart item updated successfully');
 });
 
@@ -170,6 +179,9 @@ const removeCartItem = catchAsync(async (req, res) => {
   await cart.save();
 
   const populated = await Cart.findById(cart._id).populate('items.productId', CART_POPULATE);
+
+  emitToUser(req.user._id, 'cart_updated', { cart: populated });
+
   responseHandler.success(res, 200, { cart: populated }, 'Cart item removed successfully');
 });
 
@@ -180,6 +192,9 @@ const clearCart = catchAsync(async (req, res) => {
   }
 
   await Cart.findOneAndDelete({ userId: req.user._id });
+
+  emitToUser(req.user._id, 'cart_updated', { cart: { items: [], totalAmount: 0 } });
+
   responseHandler.success(res, 200, { cart: { items: [], totalAmount: 0 } }, 'Cart cleared successfully');
 });
 

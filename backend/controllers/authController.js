@@ -4,14 +4,46 @@ const User = require('../src/models/User');
 const AppError = require('../src/utils/errors').AppError;
 const ValidationError = require('../src/utils/errors').ValidationError;
 const NotFoundError = require('../src/utils/errors').NotFoundError;
+const { generateRefreshToken, verifyRefreshToken } = require('../src/utils/jwtToken');
+const { emitToAdmins, emitToUser } = require('../src/services/socketService');
+
+// Explicit allow-list of fields safe to broadcast. Never include the password
+// hash or any token, even though the model's toJSON already strips the hash.
+const toPublicUser = (user) => ({
+  _id: user._id,
+  id: user._id,
+  username: user.username,
+  email: user.email,
+  role: user.role,
+  phone: user.phone,
+  addresses: user.addresses || [],
+  isActive: user.isActive,
+  createdAt: user.createdAt,
+});
 
 // Persist the JWT as an httpOnly cookie so sessions survive page refreshes.
+// `SameSite=Lax` keeps the cookie on same-site requests, `Secure` is enabled in
+// production, and the 7-day Max-Age makes it a persistent (not session) cookie so
+// it survives closing and reopening the browser while the token is still valid.
 const setTokenCookie = (res, token) => {
   res.cookie('token', token, {
     httpOnly: true,
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
     maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
+};
+
+// Long-lived refresh cookie (30 days). When the short-lived access cookie
+// expires, POST /api/auth/refresh silently exchanges it for a new pair, so the
+// visitor stays logged in across browser restarts without ever seeing the
+// refresh token in JS-accessible storage.
+const setRefreshCookie = (res, token) => {
+  res.cookie('refreshToken', token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 30 * 24 * 60 * 60 * 1000,
   });
 };
 
@@ -47,9 +79,13 @@ const register = catchAsync(async (req, res) => {
 
   await newUser.save();
 
+  // Admins see the new customer account in their user list without a refresh.
+  emitToAdmins('user_updated', { user: toPublicUser(newUser), action: 'created' });
+
   // Generate JWT token
   const token = newUser.generateAuthToken();
   setTokenCookie(res, token);
+  setRefreshCookie(res, generateRefreshToken(newUser));
 
   responseHandler.success(res, 201, {
     token,
@@ -95,6 +131,7 @@ const login = catchAsync(async (req, res) => {
   // Generate JWT token
   const token = user.generateAuthToken();
   setTokenCookie(res, token);
+  setRefreshCookie(res, generateRefreshToken(user));
 
   responseHandler.success(res, 200, {
     token,
@@ -146,6 +183,11 @@ const updateProfile = catchAsync(async (req, res) => {
   if (phone !== undefined) req.user.phone = String(phone).trim();
 
   await req.user.save();
+
+  // The owner's other tabs/devices update immediately; admins see the change.
+  const publicUser = toPublicUser(req.user);
+  emitToUser(req.user._id, 'profile_updated', { user: publicUser });
+  emitToAdmins('user_updated', { user: publicUser, action: 'updated' });
 
   responseHandler.success(res, 200, { user: req.user }, 'Profile updated successfully');
 });
@@ -227,23 +269,83 @@ const manageAddresses = catchAsync(async (req, res) => {
 
   await req.user.save({ validateBeforeSave: false });
 
+  // Address lists are part of the profile — same live sync as updateProfile.
+  const publicUser = toPublicUser(req.user);
+  emitToUser(req.user._id, 'profile_updated', { user: publicUser });
+  emitToAdmins('user_updated', { user: publicUser, action: 'updated' });
+
   responseHandler.success(res, 200, { action }, 'Address management completed');
 });
 
 // Logout - clear the session cookie
 const logout = catchAsync(async (req, res) => {
-  res.clearCookie('token', {
+  const cookieOptions = {
     httpOnly: true,
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
-  });
+  };
+  res.clearCookie('token', cookieOptions);
+  res.clearCookie('refreshToken', cookieOptions);
   responseHandler.success(res, 200, {}, 'Logged out successfully');
+});
+
+// Refresh - exchange a valid refresh cookie for a new access + refresh pair.
+// Called by the frontend when an API call comes back 401 (expired access token)
+// so the session is silently renewed instead of forcing a new login. The refresh
+// token is rotated on every use and never leaves the httpOnly cookie.
+const refresh = catchAsync(async (req, res) => {
+  const token = req.cookies && req.cookies.refreshToken;
+
+  if (!token) {
+    responseHandler.error(res, 401, 'No refresh token provided');
+    return;
+  }
+
+  let decoded;
+  try {
+    decoded = verifyRefreshToken(token);
+  } catch (_error) {
+    // Invalid or expired refresh token: the session cannot be renewed.
+    res.clearCookie('refreshToken', {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+    });
+    responseHandler.error(res, 401, 'Refresh token is invalid or expired');
+    return;
+  }
+
+  const user = await User.findById(decoded.id);
+  if (!user || !user.isActive) {
+    res.clearCookie('refreshToken', {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+    });
+    responseHandler.error(res, 401, 'Not authorized, user no longer exists');
+    return;
+  }
+
+  const accessToken = user.generateAuthToken();
+  setTokenCookie(res, accessToken);
+  setRefreshCookie(res, generateRefreshToken(user)); // rotation
+
+  responseHandler.success(res, 200, {
+    token: accessToken,
+    user: {
+      id: user._id,
+      username: user.username,
+      email: user.email,
+      role: user.role,
+    },
+  }, 'Token refreshed');
 });
 
 module.exports = {
   register,
   login,
   logout,
+  refresh,
   getMe,
   updateProfile,
   changePassword,

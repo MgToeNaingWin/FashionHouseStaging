@@ -208,7 +208,7 @@ const Login = () => {
               <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-gray-400">{t('loginPage.orContinue')}</span>
               <span className="h-px flex-1 bg-gray-200 dark:bg-gray-700" />
             </div>
-            <div className="mt-4 grid grid-cols-2 gap-3">
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <button
                 type="button"
                 onClick={() => fillDemo('admin')}

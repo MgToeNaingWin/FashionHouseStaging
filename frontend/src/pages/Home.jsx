@@ -6,6 +6,7 @@ import {
   Sparkles, Mail, Check, Loader2,
 } from 'lucide-react'
 import { catalogApi } from '../services/baseApi.jsx'
+import { getSocket } from '../services/socket.js'
 import { productImage } from '../lib/catalog'
 import { useToast } from '../hooks/useToast'
 import ProductCard from '../components/ProductCard'
@@ -29,6 +30,7 @@ const Home = () => {
 
   useEffect(() => {
     let alive = true
+    let timer = null
     const load = async () => {
       try {
         const [f, c, p] = await Promise.all([
@@ -47,7 +49,32 @@ const Home = () => {
       }
     }
     load()
-    return () => { alive = false }
+
+    // Live catalog sync — admin changes refresh the homepage silently.
+    const socket = getSocket()
+    let hasConnected = socket.connected
+    const schedule = () => {
+      clearTimeout(timer)
+      timer = setTimeout(() => { if (alive) load() }, 300)
+    }
+    // Catch up on anything missed while the socket was disconnected.
+    const onConnect = () => {
+      if (!hasConnected) { hasConnected = true; return }
+      schedule()
+    }
+    const events = [
+      'product_created', 'product_updated', 'product_deleted',
+      'category_created', 'category_updated', 'category_deleted',
+    ]
+    events.forEach((e) => socket.on(e, schedule))
+    socket.on('connect', onConnect)
+
+    return () => {
+      alive = false
+      clearTimeout(timer)
+      events.forEach((e) => socket.off(e, schedule))
+      socket.off('connect', onConnect)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

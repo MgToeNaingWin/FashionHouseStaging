@@ -4,9 +4,11 @@ import {
   ShoppingCart, ChevronDown, ChevronLeft, ChevronRight, AlertCircle, MapPin, Package,
 } from 'lucide-react'
 import { orderApi, formatKyat } from '../services/baseApi.jsx'
+import { getAdminSocket } from '../services/socket.js'
 import { colorSwatch } from '../lib/catalog'
 import OrderStatusBadge from '../components/OrderStatusBadge'
 import EmptyState from '../components/EmptyState'
+import TableScroll from '../components/ui/TableScroll'
 import { useToast } from '../hooks/useToast'
 
 const STATUSES = ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled', 'returned']
@@ -46,18 +48,83 @@ const AdminOrders = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter, page])
 
+  // Real-time updates from the backend. Listeners are attached here and always
+  // removed in the cleanup, so navigating away (or React StrictMode's double
+  // mount) never leaves duplicate handlers behind. The socket itself is a
+  // shared singleton owned by AdminLayout.
+  useEffect(() => {
+    const socket = getAdminSocket()
+    let hasConnected = socket.connected
+
+    const onNewOrder = (payload) => {
+      const order = payload && payload.order
+      if (!order || !order._id) return
+      // Respect the active status filter; "all" always shows the new order.
+      if (filter !== 'all' && order.orderStatus !== filter) return
+      // Deduplicate: a reconnect replay or double event must not create a
+      // second row for the same order.
+      setOrders((list) =>
+        list.some((o) => o._id === order._id) ? list : [order, ...list].slice(0, PAGE_SIZE)
+      )
+      toast.success(t('admin.orders.newOrder', { number: order.orderNumber }))
+    }
+
+    const onOrderChanged = (payload) => {
+      const order = payload && payload.order
+      if (!order || !order._id) return
+      setOrders((list) =>
+        list.map((o) => (o._id === order._id ? { ...o, ...order } : o))
+      )
+    }
+
+    // After a socket reconnect (network drop, backend restart), events emitted
+    // while offline were missed — refetch the current page to catch up.
+    const onConnect = () => {
+      if (!hasConnected) {
+        hasConnected = true
+        return
+      }
+      load(filter, page)
+    }
+
+    socket.on('new_order', onNewOrder)
+    socket.on('order_status_changed', onOrderChanged)
+    socket.on('order_updated', onOrderChanged)
+    socket.on('connect', onConnect)
+
+    return () => {
+      socket.off('new_order', onNewOrder)
+      socket.off('order_status_changed', onOrderChanged)
+      socket.off('order_updated', onOrderChanged)
+      socket.off('connect', onConnect)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, page])
+
   const changeFilter = (f) => { setFilter(f); setPage(1); setExpanded(null) }
 
+  // Pessimistic: an order status change is a critical administrative action.
+  // The row keeps its current status (and the select is disabled) until the
+  // server confirms the persisted update; only then is the row patched.
   const updateStatus = async (order, status) => {
     if (status === order.orderStatus) return
-    const prev = order.orderStatus
     setBusyId(order._id)
-    setOrders((list) => list.map((o) => (o._id === order._id ? { ...o, orderStatus: status } : o)))
     try {
-      await orderApi.updateStatus(order._id, status)
+      const data = await orderApi.updateStatus(order._id, status)
+      const updated = data?.order
+      setOrders((list) => list.map((o) => {
+        if (o._id !== order._id) return o
+        // The list rows carry a populated customer (userId object); the status
+        // mutation response only has the raw id. Keep the populated one so the
+        // customer column does not blank out until the next page load.
+        const merged = { ...o, ...(updated || {}) }
+        if (o.userId && typeof o.userId === 'object' && updated && typeof updated.userId === 'string') {
+          merged.userId = o.userId
+        }
+        return { ...merged, orderStatus: updated?.orderStatus || status }
+      }))
       toast.success(t('admin.orders.updated'))
     } catch (err) {
-      setOrders((list) => list.map((o) => (o._id === order._id ? { ...o, orderStatus: prev } : o)))
       toast.error(err.message || t('admin.loadError'))
     } finally {
       setBusyId(null)
@@ -97,33 +164,33 @@ const AdminOrders = () => {
       ) : (
         <>
           <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950">
-            <div className="overflow-x-auto">
+            <TableScroll minWidth={980} label={t('admin.orders.title')}>
               <table className="w-full text-left text-sm">
                 <thead className="border-b border-gray-100 bg-gray-50/60 text-xs uppercase tracking-wider text-gray-400 dark:border-gray-800 dark:bg-gray-900/40">
                   <tr>
-                    <th className="px-4 py-3 font-semibold">{t('admin.orders.order')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('admin.customer')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('admin.date')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('admin.amount')}</th>
-                    <th className="px-4 py-3 font-semibold">{t('admin.orderStatus')}</th>
-                    <th className="px-4 py-3 text-right font-semibold">{t('admin.actions')}</th>
+                    <th className="whitespace-nowrap px-4 py-3 font-semibold">{t('admin.orders.order')}</th>
+                    <th className="whitespace-nowrap px-4 py-3 font-semibold">{t('admin.customer')}</th>
+                    <th className="whitespace-nowrap px-4 py-3 font-semibold">{t('admin.date')}</th>
+                    <th className="whitespace-nowrap px-4 py-3 font-semibold">{t('admin.amount')}</th>
+                    <th className="whitespace-nowrap px-4 py-3 font-semibold">{t('admin.orderStatus')}</th>
+                    <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">{t('admin.actions')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50 dark:divide-gray-800/60">
                   {orders.map((o) => (
                     <React.Fragment key={o._id}>
                       <tr className="transition-colors hover:bg-gray-50/60 dark:hover:bg-gray-900/40">
-                        <td className="px-4 py-3">
+                        <td className="whitespace-nowrap px-4 py-3">
                           <p className="font-mono text-xs font-bold text-gray-900 dark:text-white">{o.orderNumber}</p>
                           <p className="text-xs text-gray-400">{t('orders.itemCount', { count: (o.items || []).length })}</p>
                         </td>
-                        <td className="px-4 py-3">
-                          <p className="font-medium text-gray-900 dark:text-white">{o.userId?.username || '—'}</p>
-                          <p className="text-xs text-gray-400">{o.userId?.email || ''}</p>
+                        <td className="w-[220px] max-w-[220px] px-4 py-3">
+                          <p className="truncate font-medium text-gray-900 dark:text-white">{o.userId?.username || '—'}</p>
+                          <p className="truncate text-xs text-gray-400">{o.userId?.email || ''}</p>
                         </td>
-                        <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{fmtDate(o.createdAt)}</td>
-                        <td className="px-4 py-3 font-semibold text-gray-900 dark:text-white">{formatKyat(o.totalAmount)}</td>
-                        <td className="px-4 py-3">
+                        <td className="whitespace-nowrap px-4 py-3 text-gray-600 dark:text-gray-300">{fmtDate(o.createdAt)}</td>
+                        <td className="whitespace-nowrap px-4 py-3 font-semibold text-gray-900 dark:text-white">{formatKyat(o.totalAmount)}</td>
+                        <td className="whitespace-nowrap px-4 py-3">
                           <select
                             value={o.orderStatus}
                             disabled={busyId === o._id}
@@ -133,7 +200,7 @@ const AdminOrders = () => {
                             {STATUSES.map((s) => <option key={s} value={s}>{t(`status.${s}`)}</option>)}
                           </select>
                         </td>
-                        <td className="px-4 py-3 text-right">
+                        <td className="whitespace-nowrap px-4 py-3 text-right">
                           <button
                             onClick={() => setExpanded(expanded === o._id ? null : o._id)}
                             className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-brand transition-colors hover:bg-brand/10"
@@ -146,7 +213,7 @@ const AdminOrders = () => {
                       {expanded === o._id && (
                         <tr className="bg-porcelain-200/40 dark:bg-gray-900/60">
                           <td colSpan={6} className="px-4 py-4">
-                            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                            <div className="grid min-w-0 grid-cols-1 gap-5 md:grid-cols-2">
                               <div>
                                 <h4 className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400"><Package size={13} /> {t('admin.orders.items')}</h4>
                                 <ul className="space-y-2">
@@ -176,7 +243,7 @@ const AdminOrders = () => {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </TableScroll>
           </div>
 
           {totalPages > 1 && (

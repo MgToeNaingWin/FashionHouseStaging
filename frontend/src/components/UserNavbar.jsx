@@ -80,13 +80,11 @@ const UserNavbar = () => {
 
   return (
     <header className="sticky top-0 z-50 border-b border-gray-100 bg-white/90 backdrop-blur-md transition-colors duration-300 dark:border-gray-800 dark:bg-ink/90">
-      <div className="container mx-auto flex items-center justify-between gap-4 px-4 py-4 md:px-6">
-        {/* Left: mobile toggle + logo */}
-        <div className="flex items-center gap-3">
-          <button type="button" onClick={() => setMobileOpen((v) => !v)} className="text-gray-700 dark:text-gray-200 md:hidden" aria-label={t('nav.menu')}>
-            {mobileOpen ? <X {...iconProps} /> : <Menu {...iconProps} />}
-          </button>
-          <Link to="/" className="flex items-center gap-2">
+      <div className="container mx-auto flex flex-wrap items-center justify-between gap-2 px-4 py-4 md:gap-4 md:px-6 md:py-4">
+        {/* Left: logo. The mobile toggle sits after it (see below) so the
+            hamburger is always on the RIGHT of the logo on the same row. */}
+        <div className="flex items-center gap-2 sm:gap-3">
+          <Link to="/" className="flex items-center gap-1.5">
             <span className="flex h-9 w-9 items-center justify-center rounded-full bg-brand text-white">
               <ShoppingBag size={18} strokeWidth={1.9} />
             </span>
@@ -96,8 +94,23 @@ const UserNavbar = () => {
           </Link>
         </div>
 
+        {/* Mobile menu toggle — right of the logo. The actions group below is
+            full-width on mobile, so it always wraps to its own row and this
+            button stays paired with the logo via the container's
+            justify-between. Touch target is padded to 36px+. */}
+        <button
+          type="button"
+          onClick={() => setMobileOpen((v) => !v)}
+          className="-mr-1 rounded-full p-2 text-gray-700 transition-colors hover:text-brand dark:text-gray-200 md:hidden"
+          aria-label={t('nav.menu')}
+          aria-expanded={mobileOpen}
+          aria-controls="mobile-nav"
+        >
+          {mobileOpen ? <X {...iconProps} /> : <Menu {...iconProps} />}
+        </button>
+
         {/* Desktop nav */}
-        <nav className="hidden items-center gap-8 md:flex">
+        <nav className="hidden items-center gap-4 lg:gap-8 md:flex">
           {navLinks.map((link) => {
             const isActive = link.path === '/' ? location.pathname === '/' : location.pathname.startsWith(link.path)
             return (
@@ -115,8 +128,10 @@ const UserNavbar = () => {
           })}
         </nav>
 
-        {/* Right actions */}
-        <div className="flex items-center gap-1.5 sm:gap-3">
+        {/* Right actions. `w-full` below md forces this group onto its own
+            row, so the logo + toggle above always share the first row; from md
+            up it sits inline exactly as before. */}
+        <div className="flex w-full items-center justify-end gap-1 sm:gap-3 md:w-auto">
           {/* Search */}
           <button type="button" onClick={() => setSearchOpen((v) => !v)} className="rounded-full p-2 text-gray-600 transition-colors hover:text-brand dark:text-gray-300" aria-label={t('nav.search')}>
             <Search {...iconProps} />
@@ -222,7 +237,7 @@ const UserNavbar = () => {
 
       {/* Mobile menu */}
       {mobileOpen && (
-        <div className="border-t border-gray-100 bg-white px-4 py-3 dark:border-gray-800 dark:bg-ink md:hidden">
+        <div id="mobile-nav" className="border-t border-gray-100 bg-white px-4 py-3 dark:border-gray-800 dark:bg-ink md:hidden">
           <nav className="flex flex-col">
             {navLinks.map((link) => (
               <Link key={link.path} to={link.path} className="border-b border-gray-50 py-3 text-sm font-semibold text-gray-700 transition-colors hover:text-brand dark:border-gray-800/60 dark:text-gray-200">

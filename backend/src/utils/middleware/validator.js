@@ -35,13 +35,25 @@ const loginSchema = joi.object({
   password: joi.string().required(),
 });
 
+// Contact form schema — mirrors the client-side validation in ContactForm.jsx
+// (name, phone, email, message are the existing form fields).
+const contactSchema = joi.object({
+  name: joi.string().trim().min(1).max(100).required(),
+  phone: joi.string().trim().pattern(/^[0-9+\-\s]{7,15}$/).required(),
+  email: joi.string().trim().email().max(150).required(),
+  message: joi.string().trim().min(1).max(2000).required(),
+});
+
 const registerValidator = validate(registerSchema);
 const loginValidator = validate(loginSchema);
+const contactValidator = validate(contactSchema);
 
 module.exports = {
   validate,
   registerValidator,
   loginValidator,
+  contactValidator,
   registerSchema,
   loginSchema,
+  contactSchema,
 };

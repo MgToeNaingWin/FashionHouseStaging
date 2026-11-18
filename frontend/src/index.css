@@ -21,6 +21,12 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
+/* Keep wide content (tables, grids, images) from forcing horizontal scroll. */
+html,
+body {
+  overflow-x: clip;
+}
+
 body {
   margin: 0;
   font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;

@@ -1,6 +1,8 @@
 const catchAsync = require('../src/utils/catchAsync');
 const responseHandler = require('../src/utils/responseHandler');
 const Category = require('../src/models/Category');
+// Category changes drive storefront navigation/filters — broadcast to all.
+const { emitToAll } = require('../src/services/socketService');
 const AppError = require('../src/utils/errors').AppError;
 const NotFoundError = require('../src/utils/errors').NotFoundError;
 const ValidationError = require('../src/utils/errors').ValidationError;
@@ -36,6 +38,9 @@ const createCategory = catchAsync(async (req, res) => {
   });
 
   await category.save();
+
+  // Emit only after the document is persisted.
+  emitToAll('category_created', { category });
 
   responseHandler.success(res, 201, { category }, 'Category created successfully');
 });
@@ -113,6 +118,9 @@ const updateCategory = catchAsync(async (req, res) => {
     return;
   }
 
+  // Emit only after the persisted update resolved.
+  emitToAll('category_updated', { category });
+
   responseHandler.success(res, 200, { category }, 'Category updated successfully');
 });
 
@@ -131,6 +139,9 @@ const deleteCategory = catchAsync(async (req, res) => {
     responseHandler.error(res, 404, 'Category not found');
     return;
   }
+
+  // Emit only after the deletion is confirmed by the database.
+  emitToAll('category_deleted', { categoryId });
 
   responseHandler.success(res, 200, { categoryId }, 'Category deleted successfully');
 });

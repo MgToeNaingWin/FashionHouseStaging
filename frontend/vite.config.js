@@ -19,6 +19,14 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      // Socket.IO (real-time admin order updates) — ws: true is required for
+      // the websocket upgrade; polling requests also pass through here.
+      '/socket.io': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+        secure: false,
+        ws: true,
+      },
     },
   },
   preview: {
@@ -28,6 +36,12 @@ export default defineConfig({
         target: 'http://localhost:5000',
         changeOrigin: true,
         secure: false,
+      },
+      '/socket.io': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+        secure: false,
+        ws: true,
       },
     },
   },

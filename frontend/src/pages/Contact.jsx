@@ -7,6 +7,7 @@ import ContactInfoCard from '../components/contact/ContactInfoCard';
 import ContactForm from '../components/contact/ContactForm';
 import NewsletterSection from '../components/contact/NewsletterSection';
 import SectionHeading from '../components/ui/SectionHeading';
+import { contactApi } from '../services/baseApi.jsx';
 import { siteConfig } from '../data/siteConfig';   // 👈 ဒီမှာ import
 
 const Contact = () => {
@@ -16,9 +17,10 @@ const Contact = () => {
   const handleContactSubmit = async (formData) => {
     setLoading(true);
     try {
-      // TODO: axios.post('/api/contact', formData)
-      await new Promise((res) => setTimeout(res, 800));
-      console.log('Contact form data:', formData);
+      // Persist the message in MongoDB via the backend; it then appears in the
+      // admin panel under Contact Messages. Errors propagate to ContactForm,
+      // which renders the error banner.
+      await contactApi.submit(formData);
     } finally {
       setLoading(false);
     }

@@ -1,6 +1,8 @@
+const http = require('http');
 const connectDB = require('./config/db');
 const config = require('./config');
 const app = require('./app');
+const { initSocketIO } = require('./services/socketService');
 
 const start = async () => {
   try {
@@ -10,7 +12,12 @@ const start = async () => {
     process.exit(1);
   }
 
-  const server = app.listen(config.port, () => {
+  // Socket.IO shares the same HTTP server as Express so admin clients receive
+  // real-time order events over the standard port.
+  const server = http.createServer(app);
+  initSocketIO(server);
+
+  server.listen(config.port, () => {
     console.log(
       `Server running in ${config.env} mode on port ${config.port}`
     );

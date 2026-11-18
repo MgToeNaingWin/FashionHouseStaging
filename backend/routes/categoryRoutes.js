@@ -11,19 +11,21 @@ router.get('/', categoryController.getCategories);
 // GET /:id - requires authentication
 router.get('/:id', authMiddleware, categoryController.getCategoryById);
 
-// POST / - requires authentication
-router.post('/', authMiddleware, categoryController.createCategory);
+// POST / - admin only. Category mutations are administrative actions; without
+// adminMiddleware any authenticated customer could rewrite storefront taxonomy.
+router.post('/', authMiddleware, adminMiddleware, categoryController.createCategory);
 
-// PUT /:id - requires authentication
-router.put('/:id', authMiddleware, categoryController.updateCategory);
+// PUT /:id - admin only
+router.put('/:id', authMiddleware, adminMiddleware, categoryController.updateCategory);
 
-// DELETE /:id - requires authentication
-router.delete('/:id', authMiddleware, categoryController.deleteCategory);
+// DELETE /:id - admin only
+router.delete('/:id', authMiddleware, adminMiddleware, categoryController.deleteCategory);
 
-// Admin-only routes
+// Admin-only aliases (kept for backwards compatibility). These also need
+// authMiddleware first so req.user exists when adminMiddleware runs.
 
-router.post('/admin', adminMiddleware, categoryController.createCategory);
-router.put('/admin/:id', adminMiddleware, categoryController.updateCategory);
-router.delete('/admin/:id', adminMiddleware, categoryController.deleteCategory);
+router.post('/admin', authMiddleware, adminMiddleware, categoryController.createCategory);
+router.put('/admin/:id', authMiddleware, adminMiddleware, categoryController.updateCategory);
+router.delete('/admin/:id', authMiddleware, adminMiddleware, categoryController.deleteCategory);
 
 module.exports = router;

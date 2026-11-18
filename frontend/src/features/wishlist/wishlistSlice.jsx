@@ -32,7 +32,8 @@ export const makeWishlistItem = (product) => ({
 })
 
 // Server wishlist -> UI items. Backend returns [{ productId: <populated product>, ... }].
-const normalizeServerWishlist = (list) =>
+// Exported because the socket sync (`wishlist_updated`) reuses the same mapping.
+export const normalizeServerWishlist = (list) =>
   (list || [])
     .map((entry) => {
       const p =
@@ -76,6 +77,7 @@ export const fetchWishlistThunk = createAsyncThunk(
 export const addToWishlistThunk = createAsyncThunk(
   'wishlist/add',
   async (product, { getState, dispatch, rejectWithValue }) => {
+    const prevItems = getState().wishlist.items
     const item = makeWishlistItem(product)
     dispatch(addWishlistLocal(item)) // optimistic
     if (!isAuthed(getState)) return item
@@ -83,6 +85,7 @@ export const addToWishlistThunk = createAsyncThunk(
       const data = await wishlistApi.add(item.productId)
       dispatch(setWishlistItems(normalizeServerWishlist(data.wishlist)))
     } catch (error) {
+      dispatch(setWishlistItems(prevItems)) // rollback on failure
       return rejectWithValue(error.message || 'Failed to add to wishlist')
     }
     return item
@@ -92,12 +95,14 @@ export const addToWishlistThunk = createAsyncThunk(
 export const removeFromWishlistThunk = createAsyncThunk(
   'wishlist/remove',
   async (productId, { getState, dispatch, rejectWithValue }) => {
+    const prevItems = getState().wishlist.items
     dispatch(removeWishlistLocal(productId)) // optimistic
     if (!isAuthed(getState)) return
     try {
       const data = await wishlistApi.remove(productId)
       dispatch(setWishlistItems(normalizeServerWishlist(data.wishlist)))
     } catch (error) {
+      dispatch(setWishlistItems(prevItems)) // rollback on failure
       return rejectWithValue(error.message || 'Failed to remove from wishlist')
     }
   }
@@ -121,11 +126,13 @@ export const toggleWishlistThunk = createAsyncThunk(
 export const clearWishlistThunk = createAsyncThunk(
   'wishlist/clear',
   async (_, { getState, dispatch, rejectWithValue }) => {
+    const prevItems = getState().wishlist.items
     dispatch(clearWishlistLocal())
     if (!isAuthed(getState)) return
     try {
       await wishlistApi.clear()
     } catch (error) {
+      dispatch(setWishlistItems(prevItems)) // rollback on failure
       return rejectWithValue(error.message || 'Failed to clear wishlist')
     }
   }

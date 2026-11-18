@@ -33,17 +33,29 @@ const Cart = () => {
   const remaining = Math.max(0, FREE_SHIPPING_THRESHOLD - subtotal)
   const progress = Math.min(100, (subtotal / FREE_SHIPPING_THRESHOLD) * 100)
 
-  const handleQty = (item, quantity) => {
-    dispatch(updateQuantityThunk({ productId: item.productId, variantId: item.variantId, quantity }))
+  const handleQty = async (item, quantity) => {
+    try {
+      await dispatch(updateQuantityThunk({ productId: item.productId, variantId: item.variantId, quantity })).unwrap()
+    } catch (err) {
+      toast.error(typeof err === 'string' ? err : t('common.actionFailed'))
+    }
   }
-  const handleRemove = (item) => {
-    dispatch(removeItemThunk({ productId: item.productId, variantId: item.variantId }))
-    toast.info(t('cart.removed'))
+  const handleRemove = async (item) => {
+    try {
+      await dispatch(removeItemThunk({ productId: item.productId, variantId: item.variantId })).unwrap()
+      toast.info(t('cart.removed'))
+    } catch (err) {
+      toast.error(typeof err === 'string' ? err : t('common.actionFailed'))
+    }
   }
-  const handleClear = () => {
-    dispatch(clearCartThunk())
+  const handleClear = async () => {
     setConfirmClear(false)
-    toast.info(t('cart.cleared'))
+    try {
+      await dispatch(clearCartThunk()).unwrap()
+      toast.info(t('cart.cleared'))
+    } catch (err) {
+      toast.error(typeof err === 'string' ? err : t('common.actionFailed'))
+    }
   }
   const goCheckout = () => {
     if (isAuthed) navigate('/checkout')

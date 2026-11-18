@@ -141,7 +141,8 @@
       "items": "Items",
       "shippingTo": "Shipping to",
       "order": "Order",
-      "placed": "Placed"
+      "placed": "Placed",
+      "newOrder": "New order received: {{number}}"
     },
     "users": {
       "title": "Customers",
@@ -180,8 +181,31 @@
       "productCount_one": "{{count}} product",
       "productCount_other": "{{count}} products"
     },
-    "shop" :{
-      "title" : "Shop"
+    "shop": {
+      "title": "Shop"
+    },
+    "messages": {
+      "title": "Contact Messages",
+      "subtitle": "Messages submitted from the customer contact form",
+      "filter": {
+        "all": "All",
+        "unread": "Unread",
+        "read": "Read"
+      },
+      "empty": {
+        "all": "No messages yet",
+        "unread": "No unread messages",
+        "read": "No read messages"
+      },
+      "markRead": "Mark as read",
+      "markUnread": "Mark as unread",
+      "delete": "Delete",
+      "deleteConfirm": "Delete this message permanently?",
+      "deleted": "Message deleted",
+      "updated": "Message updated",
+      "unreadCount": "Unread Messages",
+      "viewMessages": "View messages",
+      "newMessage": "New contact message from {{name}}"
     }
   },
   "home": {
@@ -546,10 +570,22 @@
     "teamTitle": "Our Team",
     "teamSubtitle": "Ready to help you",
     "team": {
-      "0": { "name": "Jerry Hill", "role": "Designer" },
-      "1": { "name": "Roger Jones", "role": "Manager" },
-      "2": { "name": "Bianca Oliver", "role": "Consultant" },
-      "3": { "name": "Mike Miller", "role": "Stylist" }
+      "0": {
+        "name": "Jerry Hill",
+        "role": "Designer"
+      },
+      "1": {
+        "name": "Roger Jones",
+        "role": "Manager"
+      },
+      "2": {
+        "name": "Bianca Oliver",
+        "role": "Consultant"
+      },
+      "3": {
+        "name": "Mike Miller",
+        "role": "Stylist"
+      }
     },
     "testimonialTitle": "Testimonials",
     "testimonialText": "The products I bought from Fashion House are high quality and the service is excellent.",
@@ -570,6 +606,7 @@
   "common": {
     "language": "Language",
     "retry": "Retry",
+    "actionFailed": "Something went wrong. Please try again.",
     "previous": "Previous",
     "next": "Next",
     "loading": "Loading…",
@@ -595,6 +632,10 @@
     "required": "required",
     "darkMode": "Dark mode",
     "lightMode": "Light mode",
-    "free": "Free"
+    "free": "Free",
+    "scroll": "Scroll",
+    "scrollHint": "Scroll horizontally to see every column",
+    "details": "Show details",
+    "hideDetails": "Hide details"
   }
 }

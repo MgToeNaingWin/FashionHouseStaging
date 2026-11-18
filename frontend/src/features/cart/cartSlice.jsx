@@ -44,7 +44,8 @@ export const makeCartItem = (product, variant, quantity = 1) => ({
 })
 
 // Server cart -> UI items (backend populates productId with product fields).
-const normalizeServerCart = (cart) =>
+// Exported because the socket sync (`cart_updated`) reuses the same mapping.
+export const normalizeServerCart = (cart) =>
   (cart?.items || []).map((it) => {
     const p = it.productId && typeof it.productId === 'object' ? it.productId : { _id: it.productId }
     const variant = (p.variants || []).find((v) => String(v._id) === String(it.variantId)) || {}
@@ -95,6 +96,7 @@ export const fetchCartThunk = createAsyncThunk(
 export const addToCartThunk = createAsyncThunk(
   'cart/add',
   async ({ product, variant, quantity = 1 }, { getState, dispatch, rejectWithValue }) => {
+    const prevItems = getState().cart.items
     const item = makeCartItem(product, variant, quantity)
     dispatch(addItemLocal(item)) // optimistic — works instantly for guests too
 
@@ -106,12 +108,13 @@ export const addToCartThunk = createAsyncThunk(
     } catch (error) {
       errorMessage = error.message || 'Failed to add to cart'
     }
-    // Reconcile with the server (also reverts the optimistic add if it failed).
+    // Reconcile with the authoritative server state. If that also fails and the
+    // mutation failed, roll the optimistic change back explicitly.
     try {
       const data = await cartApi.get()
       dispatch(setCartItems(normalizeServerCart(data.cart)))
     } catch {
-      /* keep optimistic local state if the server is unreachable */
+      if (errorMessage) dispatch(setCartItems(prevItems))
     }
     if (errorMessage) return rejectWithValue(errorMessage)
     return item
@@ -121,6 +124,7 @@ export const addToCartThunk = createAsyncThunk(
 export const updateQuantityThunk = createAsyncThunk(
   'cart/updateQuantity',
   async ({ productId, variantId, quantity }, { getState, dispatch, rejectWithValue }) => {
+    const prevItems = getState().cart.items
     dispatch(updateQuantityLocal({ productId, variantId, quantity }))
     if (!isAuthed(getState)) return
     let errorMessage = null
@@ -133,7 +137,7 @@ export const updateQuantityThunk = createAsyncThunk(
       const data = await cartApi.get()
       dispatch(setCartItems(normalizeServerCart(data.cart)))
     } catch {
-      /* keep local */
+      if (errorMessage) dispatch(setCartItems(prevItems))
     }
     if (errorMessage) return rejectWithValue(errorMessage)
   }
@@ -142,26 +146,35 @@ export const updateQuantityThunk = createAsyncThunk(
 export const removeItemThunk = createAsyncThunk(
   'cart/remove',
   async ({ productId, variantId }, { getState, dispatch, rejectWithValue }) => {
+    const prevItems = getState().cart.items
     dispatch(removeItemLocal({ productId, variantId }))
     if (!isAuthed(getState)) return
+    let errorMessage = null
     try {
       await cartApi.remove({ productId, variantId })
+    } catch (error) {
+      errorMessage = error.message || 'Failed to remove item'
+    }
+    try {
       const data = await cartApi.get()
       dispatch(setCartItems(normalizeServerCart(data.cart)))
-    } catch (error) {
-      return rejectWithValue(error.message || 'Failed to remove item')
+    } catch {
+      if (errorMessage) dispatch(setCartItems(prevItems))
     }
+    if (errorMessage) return rejectWithValue(errorMessage)
   }
 )
 
 export const clearCartThunk = createAsyncThunk(
   'cart/clear',
   async (_, { getState, dispatch, rejectWithValue }) => {
+    const prevItems = getState().cart.items
     dispatch(clearCartLocal())
     if (!isAuthed(getState)) return
     try {
       await cartApi.clear()
     } catch (error) {
+      dispatch(setCartItems(prevItems))
       return rejectWithValue(error.message || 'Failed to clear cart')
     }
   }

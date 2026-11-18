@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
@@ -6,6 +6,7 @@ import {
   Share2, Loader2, ArrowLeft, Minus, Plus,
 } from 'lucide-react'
 import { catalogApi, formatKyat } from '../services/baseApi.jsx'
+import { getSocket } from '../services/socket.js'
 import {
   productImage, totalStock, firstAvailableVariant, effectivePrice,
   uniqueValues, colorSwatch, isLightColor,
@@ -40,6 +41,11 @@ const ProductDetail = () => {
 
   const id = product ? String(product._id) : ''
   const wishlisted = useAppSelector(selectIsWishlisted(id))
+
+  // Ref to the current product so the always-on socket effect never needs to
+  // resubscribe when the product state changes.
+  const productRef = useRef(null)
+  useEffect(() => { productRef.current = product }, [product])
 
   useEffect(() => {
     let alive = true
@@ -80,6 +86,57 @@ const ProductDetail = () => {
     }
     load()
     return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug])
+
+  // Live updates for the product being viewed: an admin price/stock/image or
+  // availability change patches the page in place (selections preserved), and
+  // a deletion shows the not-found state instead of a stale product.
+  useEffect(() => {
+    const socket = getSocket()
+    let hasConnected = socket.connected
+
+    const onProductUpdated = (payload) => {
+      const updated = payload?.product
+      const current = productRef.current
+      if (!updated || !current) return
+      if (String(updated._id) !== String(current._id)) return
+      setProduct(updated)
+    }
+
+    const onProductDeleted = (payload) => {
+      const current = productRef.current
+      if (!current) return
+      const deletedId = String(payload?.productId || payload?.product?._id || '')
+      const deletedSlug = payload?.product?.slug || ''
+      if (deletedId === String(current._id) || (deletedSlug && deletedSlug === slug)) {
+        setProduct(null)
+        setError(t('product.notFoundHint'))
+      }
+    }
+
+    // Reconcile the viewed product after a reconnect (silent, keeps selections).
+    const onConnect = async () => {
+      if (!hasConnected) {
+        hasConnected = true
+        return
+      }
+      try {
+        const data = await catalogApi.getBySlug(slug)
+        if (data?.product) setProduct(data.product)
+      } catch {
+        /* deleted meanwhile is handled by product_deleted */
+      }
+    }
+
+    socket.on('product_updated', onProductUpdated)
+    socket.on('product_deleted', onProductDeleted)
+    socket.on('connect', onConnect)
+    return () => {
+      socket.off('product_updated', onProductUpdated)
+      socket.off('product_deleted', onProductDeleted)
+      socket.off('connect', onConnect)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug])
 
@@ -139,10 +196,14 @@ const ProductDetail = () => {
   }
 
   const handleWishlist = async () => {
-    const res = await dispatch(toggleWishlistThunk(product)).unwrap()
-    toast[res?.added ? 'success' : 'info'](
-      res?.added ? t('product.addedToWishlist') : t('product.removedFromWishlist')
-    )
+    try {
+      const res = await dispatch(toggleWishlistThunk(product)).unwrap()
+      toast[res?.added ? 'success' : 'info'](
+        res?.added ? t('product.addedToWishlist') : t('product.removedFromWishlist')
+      )
+    } catch (err) {
+      toast.error(typeof err === 'string' ? err : t('common.actionFailed'))
+    }
   }
 
   const handleShare = async () => {
@@ -366,7 +427,7 @@ const ProductDetail = () => {
                 type="button"
                 onClick={() => handleAdd(false)}
                 disabled={soldOut || adding}
-                className={`flex flex-1 items-center justify-center gap-2 rounded-full py-4 text-sm font-bold uppercase tracking-wider shadow-lift transition-colors ${
+                className={`flex w-full sm:flex-1 items-center justify-center gap-2 rounded-full py-4 text-sm font-bold uppercase tracking-wider shadow-lift transition-colors ${
                   justAdded ? 'bg-emerald-600 text-white' : 'bg-ink text-white hover:bg-brand disabled:bg-gray-400'
                 }`}
               >
@@ -377,7 +438,7 @@ const ProductDetail = () => {
                 type="button"
                 onClick={() => handleAdd(true)}
                 disabled={soldOut || adding}
-                className="flex flex-1 items-center justify-center gap-2 rounded-full bg-brand py-4 text-sm font-bold uppercase tracking-wider text-white transition-colors hover:bg-brand-600 disabled:bg-gray-400"
+                className="flex w-full sm:flex-1 items-center justify-center gap-2 rounded-full bg-brand py-4 text-sm font-bold uppercase tracking-wider text-white transition-colors hover:bg-brand-600 disabled:bg-gray-400"
               >
                 {t('product.buyNow')}
               </button>

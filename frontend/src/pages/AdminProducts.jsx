@@ -4,9 +4,11 @@ import {
   Plus, Search, Pencil, Trash2, X, Star, Package, AlertCircle, Loader2, ImageIcon, Trash,
 } from 'lucide-react'
 import { catalogApi, formatKyat, parsePrice } from '../services/baseApi.jsx'
+import { getSocket } from '../services/socket.js'
 import { totalStock, productImage } from '../lib/catalog'
 import ProductImage from '../components/ProductImage'
 import EmptyState from '../components/EmptyState'
+import TableScroll from '../components/ui/TableScroll'
 import { useToast } from '../hooks/useToast'
 
 const slugify = (s) =>
@@ -98,22 +100,22 @@ const ProductForm = ({ initial, categories, onClose, onSaved }) => {
     }
   }
 
-  const inputCls = 'w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 outline-none transition-colors focus:border-brand dark:border-gray-700 dark:bg-gray-900 dark:text-white'
+  const inputCls = 'w-full min-w-0 rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 outline-none transition-colors focus:border-brand dark:border-gray-700 dark:bg-gray-900 dark:text-white'
   const labelCls = 'mb-1.5 block text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400'
 
   return (
     <div className="fixed inset-0 z-[90] flex justify-end bg-ink/50 backdrop-blur-sm" onClick={() => !saving && onClose()}>
-      <div className="fh-slide-in flex h-full w-full max-w-2xl flex-col bg-porcelain shadow-2xl dark:bg-ink" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-4 dark:border-gray-800 dark:bg-gray-950">
-          <h2 className="font-display text-xl font-bold text-gray-900 dark:text-white">
+      <div className="fh-slide-in flex h-full w-full max-w-2xl min-w-0 flex-col bg-porcelain shadow-2xl dark:bg-ink" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between gap-3 border-b border-gray-200 bg-white px-4 py-4 dark:border-gray-800 dark:bg-gray-950 sm:px-6">
+          <h2 className="min-w-0 truncate font-display text-lg font-bold text-gray-900 dark:text-white sm:text-xl">
             {isEdit ? t('admin.products.edit') : t('admin.products.add')}
           </h2>
-          <button onClick={onClose} className="rounded-full p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800" aria-label={t('common.close')}>
+          <button onClick={onClose} className="shrink-0 rounded-full p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800" aria-label={t('common.close')}>
             <X size={20} />
           </button>
         </div>
 
-        <form onSubmit={submit} className="flex-1 space-y-6 overflow-y-auto px-6 py-6">
+        <form onSubmit={submit} className="flex-1 space-y-6 overflow-y-auto px-4 py-6 sm:px-6">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
               <label className={labelCls}>{t('admin.products.form.name')} *</label>
@@ -199,7 +201,7 @@ const ProductForm = ({ initial, categories, onClose, onSaved }) => {
           </div>
         </form>
 
-        <div className="flex gap-3 border-t border-gray-200 bg-white px-6 py-4 dark:border-gray-800 dark:bg-gray-950">
+        <div className="flex gap-3 border-t border-gray-200 bg-white px-4 py-4 dark:border-gray-800 dark:bg-gray-950 sm:px-6">
           <button type="button" onClick={onClose} disabled={saving} className="flex-1 rounded-full border border-gray-300 py-3 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200">
             {t('admin.products.form.cancel')}
           </button>
@@ -222,9 +224,10 @@ const AdminProducts = () => {
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState(null) // product object or 'new'
   const [confirmDelete, setConfirmDelete] = useState(null)
+  const [deleting, setDeleting] = useState(false)
 
-  const load = async () => {
-    setLoading(true)
+  const load = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true)
     setError(null)
     try {
       const [pData, cData] = await Promise.all([
@@ -236,13 +239,73 @@ const AdminProducts = () => {
     } catch (err) {
       setError(err.message || t('admin.loadError'))
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Live catalog sync — everything another admin (or another tab) changes is
+  // reflected in the list without a reload. Handlers dedupe by _id so the
+  // initiating client's own echo is harmless.
+  useEffect(() => {
+    const socket = getSocket()
+    let hasConnected = socket.connected
+
+    const onCreated = (payload) => {
+      const p = payload?.product
+      if (!p?._id) return
+      setProducts((prev) => (prev.some((x) => x._id === p._id) ? prev.map((x) => (x._id === p._id ? p : x)) : [p, ...prev]))
+    }
+    const onUpdated = (payload) => {
+      const p = payload?.product
+      if (!p?._id) return
+      setProducts((prev) => prev.map((x) => (x._id === p._id ? p : x)))
+    }
+    const onDeleted = (payload) => {
+      const id = String(payload?.productId || payload?.product?._id || '')
+      if (!id) return
+      setProducts((prev) => prev.map((x) => {
+        if (String(x._id) !== id) return x
+        return payload?.product ? payload.product : { ...x, status: 'inactive' }
+      }))
+    }
+    const refreshCategories = async () => {
+      try {
+        const cData = await catalogApi.getCategories()
+        setCategories(cData.categories || [])
+      } catch {
+        /* keep the current list */
+      }
+    }
+
+    const onConnect = () => {
+      if (!hasConnected) {
+        hasConnected = true
+        return
+      }
+      load({ silent: true })
+    }
+
+    socket.on('product_created', onCreated)
+    socket.on('product_updated', onUpdated)
+    socket.on('product_deleted', onDeleted)
+    socket.on('category_created', refreshCategories)
+    socket.on('category_updated', refreshCategories)
+    socket.on('category_deleted', refreshCategories)
+    socket.on('connect', onConnect)
+    return () => {
+      socket.off('product_created', onCreated)
+      socket.off('product_updated', onUpdated)
+      socket.off('product_deleted', onDeleted)
+      socket.off('category_created', refreshCategories)
+      socket.off('category_updated', refreshCategories)
+      socket.off('category_deleted', refreshCategories)
+      socket.off('connect', onConnect)
+    }
   }, [])
 
   const catName = (p) => {
@@ -263,15 +326,19 @@ const AdminProducts = () => {
 
   const handleDelete = async () => {
     const target = confirmDelete
-    setConfirmDelete(null)
-    // Optimistic: mark inactive immediately.
-    setProducts((prev) => prev.map((p) => (p._id === target._id ? { ...p, status: 'inactive' } : p)))
+    if (!target || deleting) return
+    setDeleting(true)
+    // Pessimistic: the row is only changed after the server persists the
+    // soft-delete, and the confirm dialog shows a busy state meanwhile.
     try {
       await catalogApi.remove(target._id)
+      setProducts((prev) => prev.map((p) => (p._id === target._id ? { ...p, status: 'inactive' } : p)))
+      setConfirmDelete(null)
       toast.success(t('admin.products.deleted'))
     } catch (err) {
-      setProducts((prev) => prev.map((p) => (p._id === target._id ? target : p)))
       toast.error(err.message || t('admin.loadError'))
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -300,16 +367,16 @@ const AdminProducts = () => {
         <EmptyState icon={Package} title={t('admin.products.empty')} actionLabel={t('admin.products.add')} onAction={() => setEditing('new')} />
       ) : (
         <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950">
-          <div className="overflow-x-auto">
+          <TableScroll minWidth={860} label={t('admin.products.title')}>
             <table className="w-full text-left text-sm">
               <thead className="border-b border-gray-100 bg-gray-50/60 text-xs uppercase tracking-wider text-gray-400 dark:border-gray-800 dark:bg-gray-900/40">
                 <tr>
-                  <th className="px-4 py-3 font-semibold">{t('admin.products.name')}</th>
-                  <th className="px-4 py-3 font-semibold">{t('admin.products.category')}</th>
-                  <th className="px-4 py-3 font-semibold">{t('admin.products.price')}</th>
-                  <th className="px-4 py-3 font-semibold">{t('admin.products.stock')}</th>
-                  <th className="px-4 py-3 font-semibold">{t('admin.products.status')}</th>
-                  <th className="px-4 py-3 text-right font-semibold">{t('admin.products.actions')}</th>
+                  <th className="whitespace-nowrap px-4 py-3 font-semibold">{t('admin.products.name')}</th>
+                  <th className="whitespace-nowrap px-4 py-3 font-semibold">{t('admin.products.category')}</th>
+                  <th className="whitespace-nowrap px-4 py-3 font-semibold">{t('admin.products.price')}</th>
+                  <th className="whitespace-nowrap px-4 py-3 font-semibold">{t('admin.products.stock')}</th>
+                  <th className="whitespace-nowrap px-4 py-3 font-semibold">{t('admin.products.status')}</th>
+                  <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">{t('admin.products.actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50 dark:divide-gray-800/60">
@@ -317,7 +384,7 @@ const AdminProducts = () => {
                   const stock = totalStock(p)
                   return (
                     <tr key={p._id} className="transition-colors hover:bg-gray-50/60 dark:hover:bg-gray-900/40">
-                      <td className="px-4 py-3">
+                      <td className="min-w-[220px] px-4 py-3">
                         <div className="flex items-center gap-3">
                           <ProductImage src={productImage(p)} alt={p.productName} className="h-11 w-11 shrink-0 rounded-lg object-cover" />
                           <div className="min-w-0">
@@ -329,17 +396,17 @@ const AdminProducts = () => {
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{catName(p)}</td>
-                      <td className="px-4 py-3 font-semibold text-gray-900 dark:text-white">{formatKyat(p.price)}</td>
-                      <td className="px-4 py-3">
+                      <td className="whitespace-nowrap px-4 py-3 text-gray-600 dark:text-gray-300">{catName(p)}</td>
+                      <td className="whitespace-nowrap px-4 py-3 font-semibold text-gray-900 dark:text-white">{formatKyat(p.price)}</td>
+                      <td className="whitespace-nowrap px-4 py-3">
                         <span className={`font-semibold ${stock <= 0 ? 'text-brand' : stock <= 10 ? 'text-[#b8860b] dark:text-gold' : 'text-gray-700 dark:text-gray-200'}`}>{stock}</span>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="whitespace-nowrap px-4 py-3">
                         <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${p.status === 'active' ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-gray-400/15 text-gray-500'}`}>
                           {p.status === 'active' ? t('admin.products.active') : t('admin.products.inactive')}
                         </span>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="whitespace-nowrap px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
                           <button onClick={() => setEditing(p)} className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-cobalt/10 hover:text-cobalt" aria-label={t('common.edit')}>
                             <Pencil size={16} />
@@ -354,7 +421,7 @@ const AdminProducts = () => {
                 })}
               </tbody>
             </table>
-          </div>
+          </TableScroll>
         </div>
       )}
 
@@ -368,14 +435,16 @@ const AdminProducts = () => {
       )}
 
       {confirmDelete && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-ink/60 p-4 backdrop-blur-sm" onClick={() => setConfirmDelete(null)}>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-ink/60 p-4 backdrop-blur-sm" onClick={() => !deleting && setConfirmDelete(null)}>
           <div className="fh-toast-in w-full max-w-sm rounded-2xl bg-white p-6 dark:bg-gray-950" onClick={(e) => e.stopPropagation()}>
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-brand-50 text-brand dark:bg-brand-900/30"><Trash2 size={22} /></div>
             <h3 className="font-display text-lg font-bold text-gray-900 dark:text-white">{t('admin.products.delete')}</h3>
             <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">{t('admin.products.deleteConfirm', { name: confirmDelete.productName })}</p>
             <div className="mt-5 flex gap-3">
-              <button onClick={() => setConfirmDelete(null)} className="flex-1 rounded-full border border-gray-300 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200">{t('common.cancel')}</button>
-              <button onClick={handleDelete} className="flex-1 rounded-full bg-brand py-2.5 text-sm font-semibold text-white hover:bg-brand-600">{t('common.confirm')}</button>
+              <button onClick={() => setConfirmDelete(null)} disabled={deleting} className="flex-1 rounded-full border border-gray-300 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200">{t('common.cancel')}</button>
+              <button onClick={handleDelete} disabled={deleting} className="flex flex-1 items-center justify-center gap-1.5 rounded-full bg-brand py-2.5 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-60">
+                {deleting ? <Loader2 size={15} className="animate-spin" /> : null} {t('common.confirm')}
+              </button>
             </div>
           </div>
         </div>

@@ -33,6 +33,7 @@ import NotFound from './pages/NotFound'
 import AdminDashboard from './pages/AdminDashboard'
 import AdminProducts from './pages/AdminProducts'
 import AdminOrders from './pages/AdminOrders'
+import AdminMessages from './pages/AdminMessages'
 import AdminUsers from './pages/AdminUsers'
 import AdminSettings from './pages/AdminSettings'
 
@@ -69,6 +70,7 @@ const router = createBrowserRouter([
           { path: 'dashboard', element: <AdminDashboard /> },
           { path: 'products', element: <AdminProducts /> },
           { path: 'orders', element: <AdminOrders /> },
+          { path: 'messages', element: <AdminMessages /> },
           { path: 'users', element: <AdminUsers /> },
           { path: 'settings', element: <AdminSettings /> },
         ],

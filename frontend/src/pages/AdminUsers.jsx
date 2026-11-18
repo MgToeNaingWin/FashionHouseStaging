@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Users, Search, AlertCircle, ShieldCheck, Mail } from 'lucide-react'
 import { adminApi } from '../services/baseApi.jsx'
+import { getSocket } from '../services/socket.js'
 import EmptyState from '../components/EmptyState'
 
 const AVATAR_TINTS = ['#e8363c', '#2f5bff', '#d6249f', '#f2b75a', '#10b981', '#7c3aed']
@@ -14,8 +15,8 @@ const AdminUsers = () => {
   const [search, setSearch] = useState('')
   const [roleFilter, setRoleFilter] = useState('all')
 
-  const load = async () => {
-    setLoading(true)
+  const load = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true)
     setError(null)
     try {
       const data = await adminApi.customers()
@@ -23,13 +24,42 @@ const AdminUsers = () => {
     } catch (err) {
       setError(err.message || t('admin.loadError'))
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Live user sync: registrations and profile updates arrive from the server's
+  // `user_updated` event. Deduped by _id; search/filters stay untouched.
+  useEffect(() => {
+    const socket = getSocket()
+    let hasConnected = socket.connected
+    const onUserUpdated = (payload) => {
+      const u = payload?.user
+      if (!u?._id) return
+      setCustomers((prev) => {
+        const exists = prev.some((c) => String(c._id) === String(u._id))
+        if (exists) return prev.map((c) => (String(c._id) === String(u._id) ? { ...c, ...u } : c))
+        return [u, ...prev]
+      })
+    }
+    const onConnect = () => {
+      if (!hasConnected) {
+        hasConnected = true
+        return
+      }
+      load({ silent: true })
+    }
+    socket.on('user_updated', onUserUpdated)
+    socket.on('connect', onConnect)
+    return () => {
+      socket.off('user_updated', onUserUpdated)
+      socket.off('connect', onConnect)
+    }
   }, [])
 
   const filtered = useMemo(() => {
@@ -76,17 +106,17 @@ const AdminUsers = () => {
           {filtered.map((c, i) => {
             const tint = AVATAR_TINTS[i % AVATAR_TINTS.length]
             return (
-              <div key={c._id} className="fh-fade-up flex items-center gap-4 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-950" style={{ animationDelay: `${Math.min(i, 9) * 40}ms` }}>
+              <div key={c._id} className="fh-fade-up flex min-w-0 items-center gap-4 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-950" style={{ animationDelay: `${Math.min(i, 9) * 40}ms` }}>
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full font-display text-lg font-bold text-white" style={{ backgroundColor: tint }}>
                   {(c.username || '?').charAt(0).toUpperCase()}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex min-w-0 items-center gap-1.5">
                     <p className="truncate font-semibold text-gray-900 dark:text-white">{c.username}</p>
                     {c.role === 'admin' && <ShieldCheck size={14} className="shrink-0 text-brand" />}
                   </div>
-                  <p className="flex items-center gap-1 truncate text-xs text-gray-400"><Mail size={11} /> {c.email}</p>
-                  <div className="mt-2 flex items-center gap-2">
+                  <p className="flex min-w-0 items-center gap-1 text-xs text-gray-400"><Mail size={11} className="shrink-0" /> <span className="truncate">{c.email}</span></p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${c.isActive ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-gray-400/15 text-gray-500'}`}>
                       {c.isActive ? t('admin.users.active') : t('admin.users.inactive')}
                     </span>

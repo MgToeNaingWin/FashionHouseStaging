@@ -2,6 +2,9 @@ const catchAsync = require('../src/utils/catchAsync');
 const responseHandler = require('../src/utils/responseHandler');
 const Product = require('../src/models/Product');
 const Category = require('../src/models/Category');
+// Catalog changes are public data: broadcast them to every connected storefront
+// (and admin) so listings, prices, stock and availability stay in sync.
+const { emitToAll } = require('../src/services/socketService');
 const AppError = require('../src/utils/errors').AppError;
 const NotFoundError = require('../src/utils/errors').NotFoundError;
 const ValidationError = require('../src/utils/errors').ValidationError;
@@ -89,6 +92,9 @@ const createProduct = catchAsync(async (req, res) => {
   });
 
   await product.save();
+
+  // Persisted — now announce the new product to every storefront.
+  emitToAll('product_created', { product });
 
   responseHandler.success(res, 201, { product }, 'Product created successfully');
 });
@@ -255,6 +261,9 @@ const updateProduct = catchAsync(async (req, res) => {
 
   await product.save();
 
+  // Covers price, images, variants, stock and availability changes in one event.
+  emitToAll('product_updated', { product });
+
   responseHandler.success(res, 200, { product }, 'Product updated successfully');
 });
 
@@ -277,6 +286,9 @@ const deleteProduct = catchAsync(async (req, res) => {
     responseHandler.error(res, 404, 'Product not found');
     return;
   }
+
+  // Soft delete (status -> inactive): storefronts hide it, admin lists update.
+  emitToAll('product_deleted', { productId, product });
 
   responseHandler.success(res, 200, { productId }, 'Product deactivated successfully');
 });

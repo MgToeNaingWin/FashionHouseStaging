@@ -15,6 +15,9 @@ router.post('/login', loginValidator, authController.login);
 // POST /logout - clears the session cookie
 router.post('/logout', authController.logout);
 
+// POST /refresh - exchange a valid refresh cookie for a new access + refresh pair
+router.post('/refresh', authController.refresh);
+
 // GET /me - requires authentication
 router.get('/me', authMiddleware, authController.getMe);
 

@@ -19,6 +19,52 @@ export const setAuthToken = (token) => {
   authToken = token || null
 }
 
+// --- Silent token renewal ---------------------------------------------------
+// When the short-lived access cookie expires, a request comes back 401. We then
+// call POST /api/auth/refresh once (the backend rotates the httpOnly refresh
+// cookie and issues a fresh access cookie) and replay the original request, so
+// an authenticated user is never logged out mid-session. Concurrent calls share
+// a single in-flight refresh to avoid stampedes, and auth endpoints themselves
+// are excluded so failed logins never trigger a refresh loop.
+let refreshPromise = null
+
+const REFRESH_EXEMPT_PATHS = [
+  '/api/auth/login',
+  '/api/auth/register',
+  '/api/auth/refresh',
+]
+
+const tryRefresh = () => {
+  if (!refreshPromise) {
+    refreshPromise = fetch(`${BASE_URL}/api/auth/refresh`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    })
+      .then(async (response) => {
+        const text = await response.text()
+        let json = {}
+        try {
+          json = text ? JSON.parse(text) : {}
+        } catch {
+          json = {}
+        }
+        if (!response.ok || json.success === false) {
+          throw new ApiError(
+            json.message || 'Session expired',
+            response.status
+          )
+        }
+        if (json.data && json.data.token) setAuthToken(json.data.token)
+        return json.data
+      })
+      .finally(() => {
+        refreshPromise = null
+      })
+  }
+  return refreshPromise
+}
+
 export class ApiError extends Error {
   constructor(message, status = 0, errors = []) {
     super(message)
@@ -54,33 +100,52 @@ export async function apiFetch(path, options = {}) {
     finalHeaders.Authorization = `Bearer ${authToken}`
   }
 
-  let response
-  try {
-    response = await fetch(url, {
-      method,
-      headers: finalHeaders,
-      body: payload,
-      credentials: 'include',
-      signal,
-    })
-  } catch (networkError) {
-    throw new ApiError(
-      'Cannot reach the server. Make sure the backend is running on http://localhost:5000.',
-      0
-    )
+  const execute = async () => {
+    let response
+    try {
+      response = await fetch(url, {
+        method,
+        headers: finalHeaders,
+        body: payload,
+        credentials: 'include',
+        signal,
+      })
+    } catch (networkError) {
+      throw new ApiError(
+        'Cannot reach the server. Make sure the backend is running on http://localhost:5000.',
+        0
+      )
+    }
+
+    // Read as text first so an HTML fallback produces a helpful error instead of a
+    // cryptic "Unexpected token '<'" JSON parse crash.
+    const text = await response.text()
+    let json
+    try {
+      json = text ? JSON.parse(text) : {}
+    } catch {
+      throw new ApiError(
+        'The server returned a non-JSON response. Check that the backend is running and the /api proxy is configured.',
+        response.status
+      )
+    }
+
+    return { response, json }
   }
 
-  // Read as text first so an HTML fallback produces a helpful error instead of a
-  // cryptic "Unexpected token '<'" JSON parse crash.
-  const text = await response.text()
-  let json
-  try {
-    json = text ? JSON.parse(text) : {}
-  } catch {
-    throw new ApiError(
-      'The server returned a non-JSON response. Check that the backend is running and the /api proxy is configured.',
-      response.status
-    )
+  let { response, json } = await execute()
+
+  // Expired access cookie → renew the session once and replay the request.
+  if (
+    response.status === 401 &&
+    REFRESH_EXEMPT_PATHS.indexOf(path) === -1
+  ) {
+    try {
+      await tryRefresh()
+      ;({ response, json } = await execute())
+    } catch {
+      // Refresh failed; the original 401 below decides the outcome.
+    }
   }
 
   if (!response.ok || json.success === false) {
@@ -102,6 +167,7 @@ export const authApi = {
   login: (data) => apiFetch('/api/auth/login', { method: 'POST', body: data }),
   me: () => apiFetch('/api/auth/me'),
   logout: () => apiFetch('/api/auth/logout', { method: 'POST' }),
+  refresh: () => apiFetch('/api/auth/refresh', { method: 'POST' }),
   updateProfile: (data) => apiFetch('/api/auth/profile', { method: 'PUT', body: data }),
   changePassword: (data) => apiFetch('/api/auth/change-password', { method: 'PUT', body: data }),
 }
@@ -172,6 +238,18 @@ export const orderApi = {
   allOrders: (params) => apiFetch('/api/orders/admin/all', { params }),
   updateStatus: (id, status) =>
     apiFetch(`/api/orders/admin/${id}/status`, { method: 'PUT', body: { status } }),
+}
+
+// ---------------------------------------------------------------------------
+// Contact messages (public submit; admin management)
+// ---------------------------------------------------------------------------
+export const contactApi = {
+  submit: (data) => apiFetch('/api/contact', { method: 'POST', body: data }),
+  list: (params) => apiFetch('/api/contact', { params }),
+  unreadCount: () => apiFetch('/api/contact/unread-count'),
+  setRead: (id, isRead) =>
+    apiFetch(`/api/contact/${id}/read`, { method: 'PUT', body: { isRead } }),
+  remove: (id) => apiFetch(`/api/contact/${id}`, { method: 'DELETE' }),
 }
 
 // ---------------------------------------------------------------------------

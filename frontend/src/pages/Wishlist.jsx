@@ -45,15 +45,23 @@ const Wishlist = () => {
     }
   }
 
-  const handleRemove = (item) => {
-    dispatch(removeFromWishlistThunk(item.productId))
-    toast.info(t('wishlist.removed'))
+  const handleRemove = async (item) => {
+    try {
+      await dispatch(removeFromWishlistThunk(item.productId)).unwrap()
+      toast.info(t('wishlist.removed'))
+    } catch (err) {
+      toast.error(typeof err === 'string' ? err : t('common.actionFailed'))
+    }
   }
 
-  const handleClear = () => {
-    dispatch(clearWishlistThunk())
+  const handleClear = async () => {
     setConfirmClear(false)
-    toast.info(t('wishlist.cleared'))
+    try {
+      await dispatch(clearWishlistThunk()).unwrap()
+      toast.info(t('wishlist.cleared'))
+    } catch (err) {
+      toast.error(typeof err === 'string' ? err : t('common.actionFailed'))
+    }
   }
 
   if (items.length === 0) {
@@ -82,7 +90,7 @@ const Wishlist = () => {
           <span className="text-gray-700 dark:text-gray-200">{t('wishlist.title')}</span>
         </nav>
 
-        <div className="mb-8 flex items-end justify-between">
+        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="font-display text-4xl font-black tracking-tight text-gray-900 dark:text-white md:text-5xl">
               {t('wishlist.title')}

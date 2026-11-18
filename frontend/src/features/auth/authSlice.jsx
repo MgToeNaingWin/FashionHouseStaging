@@ -101,6 +101,13 @@ const authSlice = createSlice({
     clearAuthError: (state) => {
       state.error = null
     },
+    // Merge server-authoritative profile fields (e.g. from a `profile_updated`
+    // socket event on the owner's other tab) without clobbering the session.
+    updateUserLocal: (state, action) => {
+      if (state.user && action.payload) {
+        state.user = { ...state.user, ...action.payload }
+      }
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -170,7 +177,7 @@ const authSlice = createSlice({
   },
 })
 
-export const { clearAuthState, clearAuthError } = authSlice.actions
+export const { clearAuthState, clearAuthError, updateUserLocal } = authSlice.actions
 
 export const selectUser = (state) => state.auth.user
 export const selectIsAuthenticated = (state) => state.auth.isAuthenticated
